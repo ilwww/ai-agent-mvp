@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI 助手 · 智能对话</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"
+    />
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+            colors: {
+              primary: {
+                50: '#f0f9ff',
+                100: '#e0f2fe',
+                200: '#bae6fd',
+                300: '#7dd3fc',
+                400: '#38bdf8',
+                500: '#0ea5e9',
+                600: '#0284c7',
+                700: '#0369a1',
+                800: '#075985',
+                900: '#0c4a6e',
+              },
+              ai: {
+                50: '#f0fdf4',
+                100: '#dcfce7',
+                200: '#bbf7d0',
+                300: '#86efac',
+                400: '#4ade80',
+                500: '#22c55e',
+                600: '#16a34a',
+                700: '#15803d',
+                800: '#166534',
+                900: '#14532d',
+              },
+            },
+            keyframes: {
+              fadeInUp: {
+                '0%': { opacity: '0', transform: 'translateY(16px)' },
+                '100%': { opacity: '1', transform: 'translateY(0)' },
+              },
+              blink: { '0%,100%': { opacity: '1' }, '50%': { opacity: '0' } },
+              pulse: { '0%,100%': { transform: 'scale(1)' }, '50%': { transform: 'scale(1.05)' } },
+            },
+            animation: {
+              'fade-in-up': 'fadeInUp 0.3s ease-out',
+              blink: 'blink 0.8s step-end infinite',
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      /* 滚动条美化 */
+      #messages::-webkit-scrollbar {
+        width: 5px;
+      }
+      #messages::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      #messages::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
+      }
+      #messages::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+      }
+
+      /* 流式输出光标 */
+      .streaming-cursor::after {
+        content: '▋';
+        display: inline-block;
+        animation: blink 0.8s step-end infinite;
+        color: #0ea5e9;
+        font-size: 0.9em;
+        margin-left: 1px;
+      }
+
+      /* 输入框 */
+      #input {
+        resize: none;
+        outline: none;
+      }
+
+      /* AI 消息内容排版 */
+      .ai-content p {
+        margin-bottom: 0.5em;
+      }
+      .ai-content p:last-child {
+        margin-bottom: 0;
+      }
+      .ai-content code {
+        background: #f1f5f9;
+        border: 1px solid #e2e8f0;
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-family: 'Courier New', monospace;
+        font-size: 0.85em;
+        color: #0369a1;
+      }
+      .ai-content pre {
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 12px 16px;
+        border-radius: 8px;
+        overflow-x: auto;
+        font-size: 0.85em;
+        margin: 8px 0;
+      }
+      .ai-content pre code {
+        background: none;
+        border: none;
+        padding: 0;
+        color: #e2e8f0;
+      }
+
+      /* 打字动效 */
+      @keyframes typing-dots {
+        0%,
+        80%,
+        100% {
+          transform: scale(0.6);
+          opacity: 0.4;
+        }
+        40% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+      .dot {
+        animation: typing-dots 1.2s ease-in-out infinite;
+      }
+      .dot:nth-child(2) {
+        animation-delay: 0.2s;
+      }
+      .dot:nth-child(3) {
+        animation-delay: 0.4s;
+      }
+    </style>
+  </head>
+
+  <body class="bg-slate-100 min-h-screen flex flex-col font-sans">
+    <!-- ───────────── Header ───────────── -->
+    <header
+      class="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 shadow-xl flex-shrink-0"
+    >
+      <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div
+            class="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-900/40"
+          >
+            <span class="material-icons-round text-white text-xl">smart_toy</span>
+          </div>
+          <div>
+            <h1 class="text-white font-semibold text-base leading-tight">AI 智能助手</h1>
+            <p class="text-slate-400 text-xs">由 Qwen 提供支持</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <span
+            id="status-dot"
+            class="w-2 h-2 rounded-full bg-ai-400 shadow shadow-ai-400/50"
+          ></span>
+          <span id="status-text" class="text-slate-400 text-xs">在线</span>
+          <button
+            onclick="clearChat()"
+            title="清空对话"
+            class="ml-3 text-slate-500 hover:text-slate-300 transition-colors p-1.5 rounded-lg hover:bg-white/10"
+          >
+            <span class="material-icons-round text-lg">delete_sweep</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- ───────────── Messages ───────────── -->
+    <main
+      class="flex-1 overflow-hidden flex flex-col max-w-4xl w-full mx-auto px-4 py-4"
+      style="min-height: 0"
+    >
+      <!-- 欢迎页（无消息时显示） -->
+      <div
+        id="welcome"
+        class="flex-1 flex flex-col items-center justify-center gap-6 animate__animated animate__fadeIn"
+      >
+        <div
+          class="w-20 h-20 rounded-3xl bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center shadow-2xl shadow-primary-600/30"
+        >
+          <span class="material-icons-round text-white text-4xl">psychology</span>
+        </div>
+        <div class="text-center">
+          <h2 class="text-slate-700 font-semibold text-2xl mb-2">你好，有什么可以帮你？</h2>
+          <p class="text-slate-400 text-sm">支持流式输出 · 实时回答</p>
+        </div>
+        <div class="grid grid-cols-2 gap-3 w-full max-w-lg">
+          <button
+            onclick="sendSuggestion(this)"
+            class="suggestion-btn text-left p-3.5 bg-white rounded-2xl shadow-sm hover:shadow-md hover:border-primary-200 border border-slate-200 transition-all group"
+          >
+            <span
+              class="material-icons-round text-primary-500 text-lg block mb-1.5 group-hover:scale-110 transition-transform"
+              >wb_sunny</span
+            >
+            <span class="text-slate-600 text-sm font-medium">北京今天天气怎么样？</span>
+          </button>
+          <button
+            onclick="sendSuggestion(this)"
+            class="suggestion-btn text-left p-3.5 bg-white rounded-2xl shadow-sm hover:shadow-md hover:border-primary-200 border border-slate-200 transition-all group"
+          >
+            <span
+              class="material-icons-round text-primary-500 text-lg block mb-1.5 group-hover:scale-110 transition-transform"
+              >code</span
+            >
+            <span class="text-slate-600 text-sm font-medium">用 Python 写一个快排算法</span>
+          </button>
+          <button
+            onclick="sendSuggestion(this)"
+            class="suggestion-btn text-left p-3.5 bg-white rounded-2xl shadow-sm hover:shadow-md hover:border-primary-200 border border-slate-200 transition-all group"
+          >
+            <span
+              class="material-icons-round text-primary-500 text-lg block mb-1.5 group-hover:scale-110 transition-transform"
+              >translate</span
+            >
+            <span class="text-slate-600 text-sm font-medium">把"人工智能"翻译成英文</span>
+          </button>
+          <button
+            onclick="sendSuggestion(this)"
+            class="suggestion-btn text-left p-3.5 bg-white rounded-2xl shadow-sm hover:shadow-md hover:border-primary-200 border border-slate-200 transition-all group"
+          >
+            <span
+              class="material-icons-round text-primary-500 text-lg block mb-1.5 group-hover:scale-110 transition-transform"
+              >lightbulb</span
+            >
+            <span class="text-slate-600 text-sm font-medium">给我介绍一下你自己</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 消息列表 -->
+      <div
+        id="messages"
+        class="hidden flex-1 overflow-y-auto space-y-5 pb-2 scroll-smooth"
+        style="min-height: 0"
+      ></div>
+    </main>
+
+    <!-- ───────────── Input Area ───────────── -->
+    <footer
+      class="flex-shrink-0 bg-white border-t border-slate-200 shadow-[0_-4px_24px_rgba(0,0,0,0.06)]"
+    >
+      <div class="max-w-4xl mx-auto px-4 py-3">
+        <div
+          id="input-box"
+          class="flex items-end gap-3 bg-slate-50 rounded-2xl border border-slate-200 px-4 py-3 transition-all focus-within:border-primary-400 focus-within:shadow-md focus-within:shadow-primary-100"
+        >
+          <textarea
+            id="input"
+            rows="1"
+            placeholder="输入消息，Enter 发送，Shift+Enter 换行…"
+            class="flex-1 bg-transparent text-slate-700 placeholder-slate-400 text-sm leading-relaxed max-h-32"
+            oninput="autoResize(this)"
+            onkeydown="handleKeydown(event)"
+          ></textarea>
+          <button
+            id="send-btn"
+            onclick="sendMessage()"
+            class="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white shadow-md shadow-primary-500/30 hover:from-primary-400 hover:to-primary-500 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+            title="发送"
+          >
+            <span class="material-icons-round text-lg">arrow_upward</span>
+          </button>
+        </div>
+        <p class="text-center text-slate-300 text-xs mt-2">AI 回答仅供参考，请自行判断准确性</p>
+      </div>
+    </footer>
+
+    <script>
+      // ── 状态 ──
+      let isStreaming = false;
+
+      // ── 工具函数 ──
+      const $ = (id) => document.getElementById(id);
+
+      function autoResize(el) {
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight, 128) + 'px';
+      }
+
+      function scrollToBottom() {
+        const el = $('messages');
+        el.scrollTop = el.scrollHeight;
+      }
+
+      function setStreaming(val) {
+        isStreaming = val;
+        $('send-btn').disabled = val;
+        $('input').disabled = val;
+        $('status-dot').className = val
+          ? 'w-2 h-2 rounded-full bg-primary-400 shadow shadow-primary-400/50 animate-pulse'
+          : 'w-2 h-2 rounded-full bg-ai-400 shadow shadow-ai-400/50';
+        $('status-text').textContent = val ? '生成中…' : '在线';
+      }
+
+      function showMessages() {
+        $('welcome').classList.add('hidden');
+        $('messages').classList.remove('hidden');
+        $('messages').classList.add('flex-1', 'flex', 'flex-col');
+      }
+
+      // ── 消息渲染 ──
+      function appendUserMessage(text) {
+        showMessages();
+        const div = document.createElement('div');
+        div.className = 'flex justify-end animate-fade-in-up';
+        div.innerHTML = `
+      <div class="max-w-[75%] flex items-end gap-2">
+        <div class="bg-gradient-to-br from-primary-500 to-primary-600 text-white rounded-3xl rounded-br-lg px-4 py-3 shadow-md shadow-primary-500/20 text-sm leading-relaxed whitespace-pre-wrap break-words">${escapeHtml(text)}</div>
+        <div class="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center flex-shrink-0 mb-0.5">
+          <span class="material-icons-round text-slate-500 text-sm">person</span>
+        </div>
+      </div>`;
+        $('messages').appendChild(div);
+        scrollToBottom();
+      }
+
+      function appendAiMessage() {
+        showMessages();
+        const div = document.createElement('div');
+        div.className = 'flex justify-start animate-fade-in-up';
+        div.innerHTML = `
+      <div class="max-w-[75%] flex items-end gap-2">
+        <div class="w-7 h-7 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center flex-shrink-0 mb-0.5 shadow shadow-primary-500/30">
+          <span class="material-icons-round text-white text-sm">smart_toy</span>
+        </div>
+        <div class="bg-white rounded-3xl rounded-bl-lg px-4 py-3 shadow-md border border-slate-100 text-sm leading-relaxed text-slate-700 ai-content break-words min-w-[48px]">
+          <span class="content-inner"></span>
+        </div>
+      </div>`;
+        $('messages').appendChild(div);
+        scrollToBottom();
+        return div.querySelector('.content-inner');
+      }
+
+      function appendTypingIndicator() {
+        showMessages();
+        const div = document.createElement('div');
+        div.id = 'typing-indicator';
+        div.className = 'flex justify-start animate-fade-in-up';
+        div.innerHTML = `
+      <div class="flex items-end gap-2">
+        <div class="w-7 h-7 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center flex-shrink-0 shadow shadow-primary-500/30">
+          <span class="material-icons-round text-white text-sm">smart_toy</span>
+        </div>
+        <div class="bg-white rounded-3xl rounded-bl-lg px-4 py-3 shadow-md border border-slate-100 flex items-center gap-1.5">
+          <span class="dot w-2 h-2 rounded-full bg-slate-400 block"></span>
+          <span class="dot w-2 h-2 rounded-full bg-slate-400 block"></span>
+          <span class="dot w-2 h-2 rounded-full bg-slate-400 block"></span>
+        </div>
+      </div>`;
+        $('messages').appendChild(div);
+        scrollToBottom();
+      }
+
+      function removeTypingIndicator() {
+        const el = $('typing-indicator');
+        if (el) el.remove();
+      }
+
+      function escapeHtml(s) {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+
+      // ── 发送逻辑 ──
+      async function sendMessage() {
+        if (isStreaming) return;
+        const input = $('input');
+        const prompt = input.value.trim();
+        if (!prompt) return;
+
+        input.value = '';
+        input.style.height = 'auto';
+
+        appendUserMessage(prompt);
+        appendTypingIndicator();
+        setStreaming(true);
+
+        let contentEl = null;
+        let accumulated = '';
+
+        try {
+          const res = await fetch('/chat-stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt }),
+          });
+
+          if (!res.ok) {
+            removeTypingIndicator();
+            contentEl = appendAiMessage();
+            contentEl.parentElement.classList.add('text-red-500');
+            contentEl.textContent = `⚠️ 请求失败 (${res.status})`;
+            return;
+          }
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let firstChunk = true;
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const events = buffer.split('\n\n');
+            buffer = events.pop();
+
+            for (const event of events) {
+              for (const line of event.split('\n')) {
+                if (!line.startsWith('data: ')) continue;
+                const data = line.slice(6);
+
+                if (data === '[DONE]') continue;
+
+                if (data.startsWith('[ERROR]')) {
+                  if (firstChunk) {
+                    removeTypingIndicator();
+                    contentEl = appendAiMessage();
+                    firstChunk = false;
+                  }
+                  contentEl.classList.remove('streaming-cursor');
+                  contentEl.innerHTML = `<span class="text-red-500">⚠️ ${escapeHtml(data.slice(8))}</span>`;
+                  return;
+                }
+
+                // 第一个有效 chunk：移除 typing indicator，创建 AI 消息气泡
+                if (firstChunk) {
+                  removeTypingIndicator();
+                  contentEl = appendAiMessage();
+                  contentEl.classList.add('streaming-cursor');
+                  firstChunk = false;
+                }
+
+                accumulated += data;
+                contentEl.textContent = accumulated;
+                scrollToBottom();
+              }
+            }
+          }
+        } catch (err) {
+          removeTypingIndicator();
+          if (!contentEl) contentEl = appendAiMessage();
+          contentEl.innerHTML = `<span class="text-red-500">⚠️ 网络错误：${escapeHtml(err.message)}</span>`;
+        } finally {
+          if (contentEl) contentEl.classList.remove('streaming-cursor');
+          setStreaming(false);
+          $('input').focus();
+        }
+      }
+
+      // ── 键盘事件 ──
+      function handleKeydown(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      }
+
+      // ── 建议问题 ──
+      function sendSuggestion(btn) {
+        const text = btn.querySelector('span:last-child').textContent;
+        $('input').value = text;
+        sendMessage();
+      }
+
+      // ── 清空对话 ──
+      function clearChat() {
+        if (isStreaming) return;
+        $('messages').innerHTML = '';
+        $('messages').classList.add('hidden');
+        $('welcome').classList.remove('hidden');
+      }
+
+      // ── 自动聚焦 ──
+      window.addEventListener('load', () => $('input').focus());
+    </script>
+  </body>
+</html>
