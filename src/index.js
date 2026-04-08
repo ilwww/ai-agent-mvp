@@ -28,13 +28,15 @@ await app.register(rateLimit, {
   timeWindow: config.rateLimit.timeWindow,
 });
 
-// 请求体 Schema：prompt 必填且非空字符串
+// 请求体 Schema：prompt 必填，model / enableThinking 可选
 const chatBodySchema = {
   body: {
     type: 'object',
     required: ['prompt'],
     properties: {
       prompt: { type: 'string', minLength: 1 },
+      model: { type: 'string', enum: ['qwen', 'deepseek'] },
+      enableThinking: { type: 'boolean' },
     },
     additionalProperties: false,
   },

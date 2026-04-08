@@ -5,14 +5,29 @@ if (!apiKey) {
   throw new Error('[config] DASHSCOPE_API_KEY 未配置，请在 .env 中设置 DASHSCOPE_API_KEY');
 }
 
+/**
+ * 解析整型环境变量，NaN 时抛出明确错误
+ * @param {string} name 环境变量名
+ * @param {number} fallback 默认值
+ */
+function parseIntEnv(name, fallback) {
+  const raw = process.env[name] ?? String(fallback);
+  const val = parseInt(raw, 10);
+  if (Number.isNaN(val)) {
+    throw new Error(`[config] ${name}="${raw}" 不是合法整数`);
+  }
+  return val;
+}
+
 export const config = {
   apiKey,
   baseURL: process.env.BASE_URL ?? 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   model: process.env.MODEL ?? 'qwen3-235b-a22b',
-  port: parseInt(process.env.PORT ?? '3131', 10),
+  deepseekModel: process.env.DEEPSEEK_MODEL ?? 'deepseek-v3.2',
+  port: parseIntEnv('PORT', 3131),
   rateLimit: {
-    max: parseInt(process.env.RATE_LIMIT_MAX ?? '60', 10),
+    max: parseIntEnv('RATE_LIMIT_MAX', 60),
     timeWindow: process.env.RATE_LIMIT_WINDOW ?? '1 minute',
   },
-  timeout: parseInt(process.env.REQUEST_TIMEOUT ?? '30000', 10),
+  timeout: parseIntEnv('REQUEST_TIMEOUT', 30000),
 };

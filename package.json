@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node test.mjs",
+    "test": "node src/index.js & node test/wait-ready.mjs && node test.mjs; kill %1 2>/dev/null",
     "lint": "eslint src/ test.mjs",
     "lint:fix": "eslint src/ test.mjs --fix",
     "format": "prettier --write src/ test.mjs public/",
