@@ -1,15 +1,16 @@
 # ai-node-service
 
-基于 **Fastify + OpenAI SDK** 的轻量 AI 网关服务，对接阿里云 DashScope（Qwen 系列模型），提供同步与 SSE 流式两种对话接口，并内置聊天前端页面。
+基于 **Fastify + OpenAI SDK** 的轻量 AI 网关服务，对接阿里云 DashScope（Qwen / DeepSeek 系列模型），提供同步与 SSE 流式两种对话接口，并内置聊天前端页面。
 
 ---
 
 ## 功能特性
 
-- `POST /chat` — 同步对话，支持响应缓存（基于 prompt hash）
-- `POST /chat-stream` — SSE 流式对话，实时逐字输出
+- `POST /chat` — 同步对话，支持响应缓存（基于 model + prompt hash，不同模型缓存隔离）
+- `POST /chat-stream` — SSE 流式对话，实时逐字输出，支持 DeepSeek 思考模式
 - `GET /` — 内置聊天前端页面，开箱即用
 - `GET /health` — 健康检查
+- 多模型支持（`qwen` / `deepseek`，可扩展）
 - 接口限流（`@fastify/rate-limit`）
 - 请求参数 Schema 校验（Fastify + ajv）
 - ESLint + Prettier 代码规范
@@ -25,13 +26,14 @@ ai-node-service/
 ├── src/
 │   ├── config/index.js         # 环境变量读取与配置
 │   ├── model/
+│   │   ├── index.js            # Provider 注册表（多模型扩展点）
 │   │   ├── qwen.js             # Qwen Provider（OpenAI Client 封装）
-│   │   └── index.js            # Provider 注册表（预留多模型扩展）
+│   │   └── deepseek.js         # DeepSeek Provider（支持思考模式）
 │   ├── service/
 │   │   └── chatService.js      # 业务逻辑（含缓存）
 │   ├── controller/
 │   │   ├── chatController.js   # POST /chat 处理器
-│   │   └── chatStream.js       # POST /chat-stream 处理器
+│   │   └── chatStream.js       # POST /chat-stream 处理器（SSE）
 │   └── index.js                # 服务入口
 ├── test.mjs                    # 集成测试
 ├── eslint.config.js            # ESLint v9 配置
@@ -82,7 +84,8 @@ pnpm start
 |------|:----:|--------|------|
 | `DASHSCOPE_API_KEY` | ✅ | — | 阿里云 DashScope API Key |
 | `BASE_URL` | | `https://dashscope.aliyuncs.com/compatible-mode/v1` | API 基础 URL（新加坡地域改为 `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`） |
-| `MODEL` | | `qwen3-235b-a22b` | 模型名称（可选 `qwen-plus` / `qwen-max` / `qwen-turbo`） |
+| `MODEL` | | `qwen3-235b-a22b` | Qwen 模型名称 |
+| `DEEPSEEK_MODEL` | | `deepseek-v3.2` | DeepSeek 模型名称 |
 | `PORT` | | `3131` | 服务监听端口 |
 | `RATE_LIMIT_MAX` | | `60` | 每时间窗口最大请求数 |
 | `RATE_LIMIT_WINDOW` | | `1 minute` | 限流时间窗口 |
@@ -94,13 +97,21 @@ pnpm start
 
 ### `POST /chat`
 
-同步对话，相同 prompt 命中缓存（TTL 5 分钟）直接返回。
+同步对话，相同 model + prompt 命中缓存（TTL 5 分钟）直接返回。
 
 **请求**
 
 ```json
-{ "prompt": "你好，介绍一下北京" }
+{
+  "prompt": "你好，介绍一下北京",
+  "model": "qwen"
+}
 ```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:----:|------|
+| `prompt` | string | ✅ | 用户输入，不能为空字符串 |
+| `model` | string | | `qwen`（默认）或 `deepseek` |
 
 **响应**
 
@@ -127,19 +138,39 @@ SSE 流式对话，响应头 `Content-Type: text/event-stream`。
 **请求**
 
 ```json
-{ "prompt": "用三句话介绍上海" }
+{
+  "prompt": "用三句话介绍上海",
+  "model": "deepseek",
+  "enableThinking": true
+}
 ```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:----:|------|
+| `prompt` | string | ✅ | 用户输入，不能为空字符串 |
+| `model` | string | | `qwen`（默认）或 `deepseek` |
+| `enableThinking` | boolean | | 是否开启思考模式（仅 `deepseek` 有效，默认 `false`） |
 
 **响应流**
 
 ```
-data: 上海
-data: 是中国最大的城市
+: ping
+
+event: thinking
+data: <思考过程片段>
+
+data: 上海是中国最大的城市
 data: ……
 data: [DONE]
 ```
 
-异常时推送 `data: [ERROR] <message>` 后关闭连接。
+| 事件 | 说明 |
+|------|------|
+| `: ping` | 连接建立确认注释，客户端可忽略 |
+| `event: thinking` + `data: ...` | DeepSeek 思考过程（仅 `enableThinking: true` 时出现） |
+| `data: ...` | 正式回答内容，按 chunk 实时推送 |
+| `data: [DONE]` | 流正常结束 |
+| `data: [ERROR] <message>` | 异常中断，包含错误信息 |
 
 ---
 

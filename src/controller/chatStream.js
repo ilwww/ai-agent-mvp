@@ -7,7 +7,10 @@ import { runPromptStream } from '../service/chatService.js';
  * @returns {string}  e.g. "data: line1\ndata: line2"
  */
 function encodeSSEData(text) {
-  return text.split('\n').map((line) => `data: ${line}`).join('\n');
+  return text
+    .split('\n')
+    .map((line) => `data: ${line}`)
+    .join('\n');
 }
 
 /**
@@ -36,7 +39,7 @@ export async function chatStreamHandler(request, reply) {
   raw.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
+    Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
 
