@@ -29,6 +29,6 @@ while (true) {
     process.exit(1);
   }
 
-  await new Promise((r) => setTimeout(r, INTERVAL_MS));
+  await new Promise<void>((r) => setTimeout(r, INTERVAL_MS));
   process.stdout.write('.');
 }

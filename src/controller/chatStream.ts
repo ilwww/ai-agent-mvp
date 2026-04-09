@@ -1,12 +1,12 @@
+import type { FastifyRequest, FastifyReply } from 'fastify';
 import { runPromptStream } from '../service/chatService.js';
+import type { ChatRequestBody, DashScopeDelta } from '../types.js';
 
 /**
  * 将多行文本编码为合法的 SSE data 字段序列。
  * SSE 规范要求每个 data: 字段只能占一行，内容含 \n 时须拆分。
- * @param {string} text
- * @returns {string}  e.g. "data: line1\ndata: line2"
  */
-function encodeSSEData(text) {
+function encodeSSEData(text: string): string {
   return text
     .split('\n')
     .map((line) => `data: ${line}`)
@@ -29,7 +29,10 @@ function encodeSSEData(text) {
  *   data: [DONE]\n\n                         （正常结束）
  *   data: [ERROR] <msg>\n\n                  （异常中断）
  */
-export async function chatStreamHandler(request, reply) {
+export async function chatStreamHandler(
+  request: FastifyRequest<{ Body: ChatRequestBody }>,
+  reply: FastifyReply,
+): Promise<void> {
   const { prompt, model, enableThinking = false } = request.body;
 
   // 接管响应，阻止 Fastify 在 handler promise resolve 后调用 reply.send()
@@ -55,7 +58,7 @@ export async function chatStreamHandler(request, reply) {
       // usage-only chunk（enable_thinking 时末尾会出现 choices 为空的 chunk）
       if (!chunk.choices?.length) continue;
 
-      const delta = chunk.choices[0].delta;
+      const delta = chunk.choices[0].delta as DashScopeDelta;
 
       // 思考内容 → event: thinking
       if (delta.reasoning_content) {
@@ -74,7 +77,8 @@ export async function chatStreamHandler(request, reply) {
   } catch (err) {
     request.log.error({ err }, 'chatStreamHandler error');
     if (!raw.destroyed) {
-      raw.write(`data: [ERROR] ${err.message}\n\n`);
+      const message = err instanceof Error ? err.message : String(err);
+      raw.write(`data: [ERROR] ${message}\n\n`);
     }
   } finally {
     if (!raw.destroyed) raw.end();

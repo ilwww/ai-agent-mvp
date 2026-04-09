@@ -10,7 +10,7 @@ const BASE = 'http://localhost:3131';
 let passed = 0;
 let failed = 0;
 
-function assert(label, condition, detail = '') {
+function assert(label: string, condition: boolean, detail = ''): void {
   if (condition) {
     console.log(`  ✅ ${label}`);
     passed++;
@@ -20,7 +20,7 @@ function assert(label, condition, detail = '') {
   }
 }
 
-async function post(path, body) {
+async function post(path: string, body: unknown): Promise<Response> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -35,10 +35,10 @@ async function post(path, body) {
  * 关键：使用 buffer 累积跨 chunk 的不完整行，
  * 只有遇到 \n 后才将完整行 push 进结果，避免残缺行。
  */
-async function readSSE(res) {
-  const lines = [];
+async function readSSE(res: Response): Promise<{ lines: string[]; hasDone: boolean }> {
+  const lines: string[] = [];
   let hasDone = false;
-  const reader = res.body.getReader();
+  const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   try {
@@ -54,7 +54,7 @@ async function readSSE(res) {
       buffer += decoder.decode(value, { stream: true });
       // 按 \n 切分，最后一段可能不完整，留回 buffer
       const parts = buffer.split('\n');
-      buffer = parts.pop(); // 末尾不含 \n 的片段
+      buffer = parts.pop() ?? '';
       for (const line of parts) {
         const trimmed = line.trimEnd();
         if (!trimmed) continue;
@@ -193,7 +193,7 @@ console.log('\n[11] POST /chat-stream — Qwen 流式输出');
   assert('状态码 200', res.status === 200);
   assert(
     'Content-Type 为 text/event-stream',
-    res.headers.get('content-type')?.includes('text/event-stream'),
+    res.headers.get('content-type')?.includes('text/event-stream') ?? false,
   );
   const { lines, hasDone } = await ssePromise;
   assert(
@@ -214,7 +214,7 @@ console.log('\n[12] POST /chat-stream — DeepSeek 流式输出');
   assert('状态码 200', res.status === 200);
   assert(
     'Content-Type 为 text/event-stream',
-    res.headers.get('content-type')?.includes('text/event-stream'),
+    res.headers.get('content-type')?.includes('text/event-stream') ?? false,
   );
   const { lines, hasDone } = await ssePromise;
   assert(

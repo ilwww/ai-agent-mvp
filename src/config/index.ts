@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import type { Config } from '../types.js';
 
 const apiKey = process.env.DASHSCOPE_API_KEY;
 if (!apiKey) {
@@ -7,10 +8,8 @@ if (!apiKey) {
 
 /**
  * 解析整型环境变量，NaN 时抛出明确错误
- * @param {string} name 环境变量名
- * @param {number} fallback 默认值
  */
-function parseIntEnv(name, fallback) {
+function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name] ?? String(fallback);
   const val = parseInt(raw, 10);
   if (Number.isNaN(val)) {
@@ -30,4 +29,4 @@ export const config = {
     timeWindow: process.env.RATE_LIMIT_WINDOW ?? '1 minute',
   },
   timeout: parseIntEnv('REQUEST_TIMEOUT', 30000),
-};
+} satisfies Config;

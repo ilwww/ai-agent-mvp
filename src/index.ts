@@ -1,11 +1,13 @@
-import Fastify from 'fastify';
+import { fastify as Fastify } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
+import type { FastifyRequest, FastifyReply } from 'fastify';
 import { config } from './config/index.js';
 import { chatHandler } from './controller/chatController.js';
 import { chatStreamHandler } from './controller/chatStream.js';
+import type { ChatRequestBody } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -43,12 +45,12 @@ const chatBodySchema = {
 };
 
 // 路由注册
-app.get('/', async (req, reply) => {
+app.get('/', async (_req: FastifyRequest, reply: FastifyReply) => {
   return reply.type('text/html; charset=utf-8').send(indexHtml);
 });
 
-app.post('/chat', { schema: chatBodySchema }, chatHandler);
-app.post('/chat-stream', { schema: chatBodySchema }, chatStreamHandler);
+app.post<{ Body: ChatRequestBody }>('/chat', { schema: chatBodySchema }, chatHandler);
+app.post<{ Body: ChatRequestBody }>('/chat-stream', { schema: chatBodySchema }, chatStreamHandler);
 app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
 
 // 启动服务

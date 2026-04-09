@@ -4,13 +4,15 @@
   "description": "基于 Fastify + OpenAI 的 AI 网关服务，支持 Qwen 系列模型",
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
-    "test": "node src/index.js & node test/wait-ready.mjs && node test.mjs; kill %1 2>/dev/null",
-    "lint": "eslint src/ test.mjs",
-    "lint:fix": "eslint src/ test.mjs --fix",
-    "format": "prettier --write src/ test.mjs public/",
-    "format:check": "prettier --check src/ test.mjs public/"
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "dev": "tsx --watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx src/index.ts & tsx test/wait-ready.ts && tsx test.ts; kill %1 2>/dev/null",
+    "lint": "eslint src/ test.ts",
+    "lint:fix": "eslint src/ test.ts --fix",
+    "format": "prettier --write src/ test.ts public/",
+    "format:check": "prettier --check src/ test.ts public/"
   },
   "dependencies": {
     "@fastify/rate-limit": "^9.0.0",
@@ -21,8 +23,12 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@types/node": "^25.5.2",
     "eslint": "^9.39.4",
     "globals": "^15.15.0",
-    "prettier": "^3.8.1"
+    "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.58.1"
   }
 }
