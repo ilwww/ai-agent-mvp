@@ -2,6 +2,8 @@
 
 基于 **Fastify + OpenAI SDK** 的轻量 AI 网关服务，对接阿里云 DashScope（Qwen / DeepSeek 系列模型），提供同步与 SSE 流式两种对话接口，并内置聊天前端页面。
 
+使用 **TypeScript** 编写，零 TS 错误，ESM 模块。
+
 ---
 
 ## 功能特性
@@ -24,18 +26,22 @@ ai-node-service/
 ├── public/
 │   └── index.html              # 内置聊天前端页面
 ├── src/
-│   ├── config/index.js         # 环境变量读取与配置
+│   ├── types.ts                # 共享类型定义
+│   ├── config/index.ts         # 环境变量读取与配置
 │   ├── model/
-│   │   ├── index.js            # Provider 注册表（多模型扩展点）
-│   │   ├── qwen.js             # Qwen Provider（OpenAI Client 封装）
-│   │   └── deepseek.js         # DeepSeek Provider（支持思考模式）
+│   │   ├── index.ts            # Provider 注册表（多模型扩展点）
+│   │   ├── qwen.ts             # Qwen Provider（OpenAI Client 封装）
+│   │   └── deepseek.ts         # DeepSeek Provider（支持思考模式）
 │   ├── service/
-│   │   └── chatService.js      # 业务逻辑（含缓存）
+│   │   └── chatService.ts      # 业务逻辑（含缓存）
 │   ├── controller/
-│   │   ├── chatController.js   # POST /chat 处理器
-│   │   └── chatStream.js       # POST /chat-stream 处理器（SSE）
-│   └── index.js                # 服务入口
-├── test.mjs                    # 集成测试
+│   │   ├── chatController.ts   # POST /chat 处理器
+│   │   └── chatStream.ts       # POST /chat-stream 处理器（SSE）
+│   └── index.ts                # 服务入口
+├── dist/                       # 生产编译输出（tsc）
+├── test.ts                     # 集成测试
+├── tsconfig.json               # TypeScript 配置（类型检查）
+├── tsconfig.build.json         # TypeScript 编译配置（输出 dist/）
 ├── eslint.config.js            # ESLint v9 配置
 ├── .prettierrc                 # Prettier 配置
 ├── .env.example                # 环境变量模板
@@ -67,10 +73,11 @@ DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxxxxx
 ### 3. 启动服务
 
 ```bash
-# 开发模式（文件变更自动重启）
+# 开发模式（文件变更自动重启，tsx 直接运行 TypeScript）
 pnpm dev
 
-# 生产模式
+# 生产模式（需先编译）
+pnpm build
 pnpm start
 ```
 
@@ -185,9 +192,11 @@ data: [DONE]
 ## 开发命令
 
 ```bash
-pnpm dev           # 启动开发服务（--watch）
-pnpm start         # 启动生产服务
-pnpm test          # 运行集成测试（需服务已启动）
+pnpm dev           # 启动开发服务（tsx --watch，无需编译）
+pnpm build         # 编译 TypeScript 到 dist/
+pnpm start         # 启动生产服务（需先 build）
+pnpm typecheck     # TypeScript 类型检查（不输出文件）
+pnpm test          # 运行集成测试
 pnpm lint          # ESLint 检查
 pnpm lint:fix      # ESLint 自动修复
 pnpm format        # Prettier 格式化
@@ -200,12 +209,14 @@ pnpm format:check  # Prettier 格式检查（CI 使用）
 
 | 类别 | 技术 |
 |------|------|
+| 语言 | [TypeScript 6](https://www.typescriptlang.org)（ESM，NodeNext 模块解析） |
 | Web 框架 | [Fastify v4](https://fastify.dev) |
 | AI SDK | [openai v4](https://github.com/openai/openai-node)（兼容 DashScope） |
 | 限流 | @fastify/rate-limit |
 | 缓存 | node-cache（内存，TTL 5 分钟） |
 | 环境变量 | dotenv |
-| 代码规范 | ESLint v9 + Prettier v3 |
+| 开发运行 | [tsx](https://github.com/privatenumber/tsx)（TypeScript 直接执行） |
+| 代码规范 | ESLint v9 + typescript-eslint + Prettier v3 |
 
 ---
 
