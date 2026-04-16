@@ -7,6 +7,7 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import { config } from './config/index.js';
 import { chatHandler } from './controller/chatController.js';
 import { chatStreamHandler } from './controller/chatStream.js';
+import { agentRoutes } from './routes/agent.js';
 import type { ChatRequestBody } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -51,6 +52,7 @@ app.get('/', async (_req: FastifyRequest, reply: FastifyReply) => {
 
 app.post<{ Body: ChatRequestBody }>('/chat', { schema: chatBodySchema }, chatHandler);
 app.post<{ Body: ChatRequestBody }>('/chat-stream', { schema: chatBodySchema }, chatStreamHandler);
+await app.register(agentRoutes);
 app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
 
 // 启动服务

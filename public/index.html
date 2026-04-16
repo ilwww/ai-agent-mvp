@@ -161,6 +161,72 @@
       .dot:nth-child(3) {
         animation-delay: 0.4s;
       }
+
+      /* Agent 步骤卡片 */
+      .agent-steps {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .agent-step-thought {
+        font-size: 0.75rem;
+        color: #94a3b8;
+        font-style: italic;
+        padding: 2px 0;
+      }
+      .agent-step-action {
+        font-size: 0.78rem;
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        border-radius: 8px;
+        padding: 6px 10px;
+        color: #1e40af;
+      }
+      .agent-step-action .step-label {
+        font-weight: 600;
+        margin-bottom: 2px;
+      }
+      .agent-step-action .step-detail {
+        font-family: 'Courier New', monospace;
+        font-size: 0.72rem;
+        color: #3b82f6;
+        word-break: break-all;
+      }
+      .agent-step-result {
+        font-size: 0.78rem;
+        background: #f0fdf4;
+        border: 1px solid #bbf7d0;
+        border-radius: 8px;
+        padding: 6px 10px;
+        color: #166534;
+      }
+      .agent-step-result .step-label {
+        font-weight: 600;
+        margin-bottom: 2px;
+      }
+      .agent-step-result .step-detail {
+        font-family: 'Courier New', monospace;
+        font-size: 0.72rem;
+        color: #22c55e;
+        word-break: break-all;
+      }
+      .agent-step-done {
+        margin-top: 4px;
+        padding-top: 6px;
+        border-top: 1px solid #e2e8f0;
+        font-size: 0.875rem;
+        color: #334155;
+        line-height: 1.6;
+        white-space: pre-wrap;
+      }
+      .agent-step-error {
+        font-size: 0.78rem;
+        color: #dc2626;
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        border-radius: 8px;
+        padding: 6px 10px;
+      }
     </style>
   </head>
 
@@ -291,6 +357,13 @@
           >
             DeepSeek
           </button>
+          <button
+            id="btn-agent"
+            onclick="selectModel('agent')"
+            class="model-btn px-2.5 py-1 rounded-lg text-xs font-medium transition-all bg-slate-100 text-slate-500 hover:bg-slate-200"
+          >
+            Agent
+          </button>
           <!-- 思考模式开关（仅 DeepSeek 可用） -->
           <label
             id="thinking-toggle"
@@ -398,7 +471,7 @@
       // ── 模型选择 ──
       function selectModel(model) {
         selectedModel = model;
-        ['qwen', 'deepseek'].forEach((m) => {
+        ['qwen', 'deepseek', 'agent'].forEach((m) => {
           const btn = $(`btn-${m}`);
           if (m === model) {
             btn.className = btn.className.replace(
@@ -495,6 +568,68 @@
           : 'expand_less';
       }
 
+      function appendAgentMessage() {
+        showMessages();
+        const div = document.createElement('div');
+        div.className = 'flex justify-start animate-fade-in-up';
+        div.innerHTML = `
+          <div class="max-w-[75%] flex items-end gap-2">
+            <div class="w-7 h-7 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center flex-shrink-0 mb-0.5 shadow shadow-primary-500/30">
+              <span class="material-icons-round text-white text-sm">smart_toy</span>
+            </div>
+            <div class="bg-white rounded-3xl rounded-bl-lg px-4 py-3 shadow-md border border-slate-100 text-sm leading-relaxed text-slate-700 break-words min-w-[200px]">
+              <div class="agent-steps"></div>
+            </div>
+          </div>`;
+        $('messages').appendChild(div);
+        scrollToBottom();
+        return div.querySelector('.agent-steps');
+      }
+
+      function appendThoughtStep(container, text) {
+        const el = document.createElement('div');
+        el.className = 'agent-step-thought';
+        el.textContent = text;
+        container.appendChild(el);
+        scrollToBottom();
+      }
+
+      function appendActionStep(container, data) {
+        const el = document.createElement('div');
+        el.className = 'agent-step-action';
+        const inputStr = typeof data.input === 'string' ? data.input : JSON.stringify(data.input);
+        el.innerHTML = `<div class="step-label">🔧 调用工具: ${escapeHtml(data.tool)}</div><div class="step-detail">参数: ${escapeHtml(inputStr)}</div>`;
+        container.appendChild(el);
+        scrollToBottom();
+      }
+
+      function appendResultStep(container, data) {
+        const el = document.createElement('div');
+        el.className = 'agent-step-result';
+        const outputStr = typeof data.output === 'string' ? data.output : JSON.stringify(data.output);
+        el.innerHTML = `<div class="step-label">📋 结果: ${escapeHtml(data.tool)}</div><div class="step-detail">${escapeHtml(outputStr)}</div>`;
+        container.appendChild(el);
+        scrollToBottom();
+      }
+
+      function appendDoneStep(container, data) {
+        const el = document.createElement('div');
+        el.className = 'agent-step-done';
+        const output = typeof data === 'string' ? data : (data.output || JSON.stringify(data));
+        el.textContent = output;
+        container.appendChild(el);
+        scrollToBottom();
+      }
+
+      function appendErrorStep(container, data) {
+        const el = document.createElement('div');
+        el.className = 'agent-step-error';
+        const msg = typeof data === 'string' ? data : (data.error || JSON.stringify(data));
+        el.textContent = '⚠️ ' + msg;
+        container.appendChild(el);
+        scrollToBottom();
+      }
+
       function appendTypingIndicator() {
         showMessages();
         const div = document.createElement('div');
@@ -538,14 +673,104 @@
         appendTypingIndicator();
         setStreaming(true);
 
+        currentAbortController = new AbortController();
+
+        if (selectedModel === 'agent') {
+          await sendAgentMessage(prompt);
+        } else {
+          await sendStreamMessage(prompt);
+        }
+      }
+
+      async function sendAgentMessage(prompt) {
+        let stepsContainer = null;
+        let initialized = false;
+
+        try {
+          const res = await fetch('/agent/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ input: prompt }),
+            signal: currentAbortController.signal,
+          });
+
+          if (!res.ok) {
+            removeTypingIndicator();
+            stepsContainer = appendAgentMessage();
+            appendErrorStep(stepsContainer, `请求失败 (${res.status})`);
+            return;
+          }
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const events = buffer.split('\n\n');
+            buffer = events.pop();
+
+            for (const event of events) {
+              let eventType = '';
+              let dataStr = '';
+              for (const line of event.split('\n')) {
+                if (line.startsWith('event: ')) eventType = line.slice(7).trim();
+                else if (line.startsWith('data: ')) dataStr = line.slice(6);
+                else if (line.startsWith(':')) continue;
+              }
+
+              if (!eventType || !dataStr) continue;
+
+              if (!initialized) {
+                removeTypingIndicator();
+                stepsContainer = appendAgentMessage();
+                initialized = true;
+              }
+
+              let data;
+              try { data = JSON.parse(dataStr); } catch { data = dataStr; }
+
+              if (eventType === 'thought') {
+                appendThoughtStep(stepsContainer, typeof data === 'string' ? data : JSON.stringify(data));
+              } else if (eventType === 'action') {
+                appendActionStep(stepsContainer, data);
+              } else if (eventType === 'result') {
+                appendResultStep(stepsContainer, data);
+              } else if (eventType === 'done') {
+                appendDoneStep(stepsContainer, data);
+              } else if (eventType === 'error') {
+                appendErrorStep(stepsContainer, data);
+              }
+            }
+          }
+        } catch (err) {
+          if (err.name === 'AbortError') {
+            removeTypingIndicator();
+            if (!initialized) {
+              stepsContainer = appendAgentMessage();
+              appendThoughtStep(stepsContainer, '⏹ 已中断');
+            }
+          } else {
+            removeTypingIndicator();
+            if (!initialized) stepsContainer = appendAgentMessage();
+            if (stepsContainer) appendErrorStep(stepsContainer, `网络错误：${err.message}`);
+          }
+        } finally {
+          setStreaming(false);
+          $('input').focus();
+        }
+      }
+
+      async function sendStreamMessage(prompt) {
         const withThinking = selectedModel === 'deepseek' && enableThinking;
         let thinkingEl = null;
         let contentEl = null;
         let thinkingAccumulated = '';
         let answerAccumulated = '';
         let initialized = false;
-
-        currentAbortController = new AbortController();
 
         try {
           const res = await fetch('/chat-stream', {

@@ -1,7 +1,7 @@
 {
-  "name": "ai-node-service",
-  "version": "1.0.0",
-  "description": "基于 Fastify + OpenAI 的 AI 网关服务，支持 Qwen 系列模型",
+  "name": "ai-agent-mvp",
+  "version": "2.0.0",
+  "description": "基于 Fastify + OpenAI 的 AI Agent 服务，支持 ReAct 循环、Tool 调用、SSE 流式输出，对接 Qwen / DeepSeek 模型",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

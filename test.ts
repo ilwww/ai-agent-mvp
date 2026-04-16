@@ -260,6 +260,121 @@ console.log('\n[14] POST /chat-stream — 缺少 prompt（应返回 400）');
   assert('状态码 400', res.status === 400);
 }
 
+/**
+ * 读取 Agent SSE 流，返回事件数组 [{ event, data }]
+ */
+async function readAgentSSE(
+  res: Response,
+): Promise<{ events: Array<{ event: string; data: string }>; raw: string[] }> {
+  const events: Array<{ event: string; data: string }> = [];
+  const raw: string[] = [];
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        buffer += decoder.decode();
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split('\n\n');
+      buffer = blocks.pop() ?? '';
+      for (const block of blocks) {
+        if (!block.trim()) continue;
+        let eventType = '';
+        let data = '';
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event: ')) eventType = line.slice(7).trim();
+          else if (line.startsWith('data: ')) data = line.slice(6);
+          else if (line.startsWith(':')) continue;
+          raw.push(line);
+        }
+        if (eventType) events.push({ event: eventType, data });
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return { events, raw };
+}
+
+// ─────────────────────────────────────────────
+// Case 15: POST /agent/run — Agent 正常执行（getWeather 工具）
+// ─────────────────────────────────────────────
+console.log('\n[15] POST /agent/run — Agent 正常执行（getWeather 工具）');
+{
+  const res = await post('/agent/run', { input: '北京天气怎么样？', tools: ['getWeather'] });
+  const ssePromise = readAgentSSE(res);
+  assert('状态码 200', res.status === 200);
+  assert(
+    'Content-Type 为 text/event-stream',
+    res.headers.get('content-type')?.includes('text/event-stream') ?? false,
+  );
+  const { events } = await ssePromise;
+  const eventTypes = events.map((e) => e.event);
+  assert(
+    '包含 thought 事件',
+    eventTypes.includes('thought'),
+    `实际 events: ${JSON.stringify(eventTypes)}`,
+  );
+  assert(
+    '包含 done 事件',
+    eventTypes.includes('done'),
+    `实际 events: ${JSON.stringify(eventTypes)}`,
+  );
+}
+
+// ─────────────────────────────────────────────
+// Case 16: POST /agent/run — 不指定 tools（使用全部工具）
+// ─────────────────────────────────────────────
+console.log('\n[16] POST /agent/run — 不指定 tools（使用全部工具）');
+{
+  const res = await post('/agent/run', { input: '帮我搜索一下人工智能' });
+  const ssePromise = readAgentSSE(res);
+  assert('状态码 200', res.status === 200);
+  const { events } = await ssePromise;
+  const eventTypes = events.map((e) => e.event);
+  assert(
+    '包含 thought 事件',
+    eventTypes.includes('thought'),
+    `实际 events: ${JSON.stringify(eventTypes)}`,
+  );
+  assert(
+    '包含 done 事件',
+    eventTypes.includes('done'),
+    `实际 events: ${JSON.stringify(eventTypes)}`,
+  );
+}
+
+// ─────────────────────────────────────────────
+// Case 17: POST /agent/run — 参数校验：缺少 input
+// ─────────────────────────────────────────────
+console.log('\n[17] POST /agent/run — 缺少 input（应返回 400）');
+{
+  const res = await post('/agent/run', {});
+  assert('状态码 400', res.status === 400);
+}
+
+// ─────────────────────────────────────────────
+// Case 18: POST /agent/run — 参数校验：input 为空字符串
+// ─────────────────────────────────────────────
+console.log('\n[18] POST /agent/run — input 为空字符串（应返回 400）');
+{
+  const res = await post('/agent/run', { input: '' });
+  assert('状态码 400', res.status === 400);
+}
+
+// ─────────────────────────────────────────────
+// Case 19: POST /agent/run — 参数校验：多余字段
+// ─────────────────────────────────────────────
+console.log('\n[19] POST /agent/run — 包含 additionalProperties（应返回 400）');
+{
+  const res = await post('/agent/run', { input: '你好', extra: 'field' });
+  assert('状态码 400', res.status === 400);
+}
+
 // ─────────────────────────────────────────────
 // 汇总
 // ─────────────────────────────────────────────

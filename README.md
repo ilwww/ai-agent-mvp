@@ -1,6 +1,6 @@
-# ai-node-service
+# ai-agent-mvp
 
-基于 **Fastify + OpenAI SDK** 的轻量 AI 网关服务，对接阿里云 DashScope（Qwen / DeepSeek 系列模型），提供同步与 SSE 流式两种对话接口，并内置聊天前端页面。
+基于 **Fastify + OpenAI SDK** 的 AI Agent 服务，对接阿里云 DashScope（Qwen / DeepSeek 系列模型），支持 **Agent ReAct 循环、Tool 调用、SSE 流式过程输出**，同时保留同步与流式对话接口，并内置聊天前端页面。
 
 使用 **TypeScript** 编写，零 TS 错误，ESM 模块。
 
@@ -8,10 +8,12 @@
 
 ## 功能特性
 
+- `POST /agent/run` — Agent 模式，ReAct 循环决策 + Tool 调用 + SSE 流式过程输出（thought/action/result/done/error）
 - `POST /chat` — 同步对话，支持响应缓存（基于 model + prompt hash，不同模型缓存隔离）
 - `POST /chat-stream` — SSE 流式对话，实时逐字输出，支持 DeepSeek 思考模式
-- `GET /` — 内置聊天前端页面，开箱即用
+- `GET /` — 内置聊天前端页面，支持 Qwen / DeepSeek / Agent 三种模式切换
 - `GET /health` — 健康检查
+- Agent 内置工具：`getWeather`（天气查询）、`search`（关键词搜索），可扩展
 - 多模型支持（`qwen` / `deepseek`，可扩展）
 - 接口限流（`@fastify/rate-limit`）
 - 请求参数 Schema 校验（Fastify + ajv）
@@ -22,12 +24,27 @@
 ## 目录结构
 
 ```
-ai-node-service/
+ai-agent-mvp/
 ├── public/
-│   └── index.html              # 内置聊天前端页面
+│   └── index.html              # 内置聊天前端页面（支持 Agent 模式）
 ├── src/
 │   ├── types.ts                # 共享类型定义
 │   ├── config/index.ts         # 环境变量读取与配置
+│   ├── agent/                  # Agent 核心模块
+│   │   ├── types.ts            # Agent 类型定义（Action / Tool / AgentState 等）
+│   │   ├── runtime.ts          # Agent ReAct 循环
+│   │   ├── planner.ts          # Planner（LLM 决策层）
+│   │   ├── executor.ts         # Executor（工具执行器）
+│   │   ├── memory.ts           # Memory（状态管理）
+│   │   └── tools/              # 工具系统
+│   │       ├── registry.ts     # 工具注册中心
+│   │       ├── weather.ts      # 天气查询工具
+│   │       ├── search.ts       # 搜索工具
+│   │       └── index.ts        # 工具自动加载
+│   ├── protocol/
+│   │   └── sse.ts              # SSE 协议封装
+│   ├── routes/
+│   │   └── agent.ts            # POST /agent/run 路由
 │   ├── model/
 │   │   ├── index.ts            # Provider 注册表（多模型扩展点）
 │   │   ├── qwen.ts             # Qwen Provider（OpenAI Client 封装）
@@ -178,6 +195,62 @@ data: [DONE]
 | `data: ...` | 正式回答内容，按 chunk 实时推送 |
 | `data: [DONE]` | 流正常结束 |
 | `data: [ERROR] <message>` | 异常中断，包含错误信息 |
+
+---
+
+### `POST /agent/run`
+
+Agent 模式，ReAct 循环自动决策并调用工具，通过 SSE 流式输出执行过程。
+
+**请求**
+
+```json
+{
+  "input": "北京天气怎么样？",
+  "tools": ["getWeather"]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:----:|------|
+| `input` | string | ✅ | 用户任务输入，不能为空字符串 |
+| `tools` | string[] | | 可选，指定使用的工具名列表；不传则使用全部已注册工具 |
+
+**响应流**
+
+```
+: ping
+
+event: thought
+data: 第 1 步决策：调用工具 getWeather
+
+event: action
+data: {"tool":"getWeather","input":{"city":"北京"}}
+
+event: result
+data: {"tool":"getWeather","output":{"temp":25,"weather":"晴"}}
+
+event: thought
+data: 第 2 步决策：任务完成
+
+event: done
+data: {"output":"北京今天天气晴，气温25度。"}
+```
+
+| 事件 | 说明 |
+|------|------|
+| `event: thought` | Agent 决策思考过程 |
+| `event: action` | 工具调用通知（含工具名和参数） |
+| `event: result` | 工具执行结果 |
+| `event: done` | Agent 任务完成，包含最终回答 |
+| `event: error` | 工具执行或运行时错误 |
+
+**内置工具**
+
+| 工具名 | 说明 |
+|--------|------|
+| `getWeather` | 获取指定城市天气信息（MVP 阶段返回模拟数据） |
+| `search` | 搜索指定关键词信息（MVP 阶段返回模拟数据） |
 
 ---
 
