@@ -1,9 +1,10 @@
 import type { ServerResponse } from 'node:http';
-import type { AgentState, Tool } from './types.js';
+import type { AgentState, Tool, ToolAction } from './types.js';
 import { createInitialState, updateState } from './memory.js';
 import { plan } from './planner.js';
 import { execute } from './executor.js';
 import { sendSSE } from '../protocol/sse.js';
+import type { SessionStore, SessionTurn } from '../store/types.js';
 
 /**
  * Agent 单次任务允许的最大执行步数
@@ -13,90 +14,121 @@ import { sendSSE } from '../protocol/sse.js';
  */
 const MAX_STEPS = 10;
 
+const MAX_STEPS_MESSAGE = '已达到最大执行步数限制，任务终止。';
+
+/**
+ * 判断链路是否已中止（客户端断开或 AbortController.abort）
+ */
+function isAborted(raw: ServerResponse, signal?: AbortSignal): boolean {
+  return raw.destroyed || (signal?.aborted ?? false);
+}
+
+/** 可选的会话上下文；由路由层根据 body.session_id 组装 */
+export interface SessionContext {
+  id: string;
+  store: SessionStore;
+  /** 已保存的历史 turn 列表；空数组等同新会话 */
+  historyTurns: SessionTurn[];
+}
+
 /**
  * 启动并运行一次完整的 Agent 任务
  *
- * 核心执行循环：
- * 1. 调用 `plan` 获取 LLM 决策（ToolAction 或 FinishAction）
- * 2. 通过 SSE 推送 `thought` 事件告知客户端当前决策
- * 3. 若决策为 `finish`，推送 `done` 事件并结束
- * 4. 若决策为 `tool`，推送 `action` 事件 → 执行工具 → 推送 `result`/`error` 事件
- * 5. 将本步骤结果追加到 state，进入下一轮循环
- * 6. 超过 MAX_STEPS 后强制推送 `done` 事件终止任务
- *
- * SSE 事件说明：
- * - `thought`：每步决策的文字说明
- * - `action`：即将调用的工具名和入参
- * - `result`：工具执行成功的输出
- * - `error`：工具执行失败的错误信息
- * - `done`：任务结束，携带最终回答
- *
- * @param input 用户输入的任务描述
- * @param tools 本次任务可使用的工具列表
- * @param raw   Node.js HTTP ServerResponse，用于向客户端推送 SSE 事件
- * @returns Promise<void>，任务结束或连接断开时 resolve
- *
- * @example
- * import { getAllTools } from './tools/index.js';
- *
- * // 在 HTTP 请求处理器中启动 Agent
- * app.get('/api/agent/run', async (req, res) => {
- *   res.setHeader('Content-Type', 'text/event-stream');
- *   await runAgent('北京今天天气怎么样？', getAllTools(), res);
- *   res.end();
- * });
- *
- * // 客户端将依次收到如下 SSE 事件：
- * // event: thought  data: "第 1 步决策：调用工具 getWeather"
- * // event: action   data: {"tool":"getWeather","input":{"city":"北京"}}
- * // event: result   data: {"tool":"getWeather","output":{"city":"北京","temperature":28,...}}
- * // event: thought  data: "第 2 步决策：任务完成"
- * // event: done     data: {"output":"北京今天晴，气温 28°C，东南风 3 级。"}
+ * 支持：
+ * - OpenAI 原生 function-calling：一次 plan 可能返回多个 tool_call，并发执行
+ * - AbortSignal 透传：客户端断连时可中止 LLM 与工具的 fetch
+ * - 可选 SessionContext：跨请求多轮记忆（按 turn 组织）
  */
 export async function runAgent(
   input: string,
   tools: Tool[],
   raw: ServerResponse,
+  signal?: AbortSignal,
+  session?: SessionContext,
 ): Promise<void> {
+  // state 只承载"当前回合"，历史 turn 由 planner 走 historyTurns 参数展开
   let state: AgentState = createInitialState(input);
+
+  if (session) {
+    sendSSE(raw, 'session', {
+      session_id: session.id,
+      restored_turns: session.historyTurns.length,
+    });
+  }
+
   let step = 0;
+  let finalOutput: string | undefined;
 
   while (step < MAX_STEPS) {
-    // 若客户端已断开连接，提前终止循环避免无效执行
-    if (raw.destroyed) break;
+    if (isAborted(raw, signal)) return;
 
-    const action = await plan(state, tools);
+    const actions = await plan(state, tools, signal, session?.historyTurns);
 
-    sendSSE(
-      raw,
-      'thought',
-      `第 ${step + 1} 步决策：${action.type === 'tool' ? `调用工具 ${action.name}` : '任务完成'}`,
-    );
+    if (isAborted(raw, signal)) return;
 
-    if (action.type === 'finish') {
-      sendSSE(raw, 'done', { output: action.output });
-      return;
+    // Finish 分支：LLM 直接给出最终答案
+    if (actions.length === 1 && actions[0].type === 'finish') {
+      sendSSE(raw, 'thought', `第 ${step + 1} 步决策：任务完成`);
+      sendSSE(raw, 'done', { output: actions[0].output });
+      finalOutput = actions[0].output;
+      break;
     }
 
-    // action.type === 'tool'：推送动作事件后执行工具
-    sendSSE(raw, 'action', { tool: action.name, input: action.input });
+    // Tool 分支：一批 ToolAction（可能 1 个或多个）
+    const toolActions = actions.filter((a): a is ToolAction => a.type === 'tool');
+    const toolNames = toolActions.map((a) => a.name).join(', ');
+    sendSSE(raw, 'thought', `第 ${step + 1} 步决策：调用工具 ${toolNames}`);
 
-    try {
-      const result = await execute(action);
-      sendSSE(raw, 'result', { tool: action.name, output: result });
-      state = updateState(state, { action, result });
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      sendSSE(raw, 'error', { tool: action.name, error: errorMsg });
-      // 即使工具执行失败，也将错误信息记录到 state，让 LLM 下一步可感知错误
-      state = updateState(state, { action, error: errorMsg });
+    for (const action of toolActions) {
+      sendSSE(raw, 'action', { id: action.id, tool: action.name, input: action.input });
+    }
+
+    const results = await Promise.all(
+      toolActions.map(async (action) => {
+        try {
+          const result = await execute(action, signal);
+          return { action, result, error: undefined as string | undefined };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { action, result: undefined as unknown, error: message };
+        }
+      }),
+    );
+
+    if (isAborted(raw, signal)) return;
+
+    for (const { action, result, error } of results) {
+      if (error !== undefined) {
+        sendSSE(raw, 'error', { tool: action.name, error });
+        state = updateState(state, { action, error });
+      } else {
+        sendSSE(raw, 'result', { tool: action.name, output: result });
+        state = updateState(state, { action, result });
+      }
     }
 
     step++;
   }
 
-  // 超过 MAX_STEPS 强制结束，防止无限循环
-  if (!raw.destroyed) {
-    sendSSE(raw, 'done', { output: '已达到最大执行步数限制，任务终止。' });
+  // 达到 MAX_STEPS 未 finish：SSE done 兜底提示，并把兜底文案作为 finalOutput
+  if (finalOutput === undefined && !isAborted(raw, signal)) {
+    sendSSE(raw, 'done', { output: MAX_STEPS_MESSAGE });
+    finalOutput = MAX_STEPS_MESSAGE;
+  }
+
+  // Abort 时 finalOutput 仍为 undefined，跳过写回
+  if (session && finalOutput !== undefined) {
+    const newTurn: SessionTurn = {
+      userInput: input,
+      steps: state.steps,
+      finalOutput,
+    };
+    const now = Date.now();
+    await session.store.save({
+      sessionId: session.id,
+      turns: [...session.historyTurns, newTurn],
+      createdAt: now,
+      updatedAt: now,
+    });
   }
 }

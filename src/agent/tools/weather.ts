@@ -107,9 +107,9 @@ interface WeatherResult {
  * const geo = await geocode('不存在的城市XYZ');
  * // => null
  */
-async function geocode(city: string): Promise<GeoResult | null> {
+async function geocode(city: string, signal?: AbortSignal): Promise<GeoResult | null> {
   const url = `${GEOCODING_URL}?name=${encodeURIComponent(city)}&count=1&language=zh`;
-  const res = await fetch(url);
+  const res = await fetch(url, { signal });
   if (!res.ok) return null;
   const data = (await res.json()) as { results?: GeoResult[] };
   return data.results?.[0] ?? null;
@@ -139,9 +139,13 @@ async function geocode(city: string): Promise<GeoResult | null> {
  * //   unit: { temperature: '°C', windSpeed: 'km/h', humidity: '%' },
  * // }
  */
-async function fetchWeather(lat: number, lon: number): Promise<WeatherResult | null> {
+async function fetchWeather(
+  lat: number,
+  lon: number,
+  signal?: AbortSignal,
+): Promise<WeatherResult | null> {
   const url = `${WEATHER_URL}?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m`;
-  const res = await fetch(url);
+  const res = await fetch(url, { signal });
   if (!res.ok) return null;
   const data = (await res.json()) as {
     current: {
@@ -214,15 +218,16 @@ export const getWeather: Tool = {
     },
     required: ['city'],
   },
-  async run(input) {
+  async run(input, ctx) {
     const city = input.city as string;
+    const signal = ctx?.signal;
 
-    const geo = await geocode(city);
+    const geo = await geocode(city, signal);
     if (!geo) {
       return { error: `无法找到城市「${city}」的地理位置信息` };
     }
 
-    const weather = await fetchWeather(geo.latitude, geo.longitude);
+    const weather = await fetchWeather(geo.latitude, geo.longitude, signal);
     if (!weather) {
       return { error: `获取「${city}」天气数据失败` };
     }

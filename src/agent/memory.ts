@@ -20,7 +20,6 @@ import type { AgentState, AgentStep } from './types.js';
 export function createInitialState(input: string): AgentState {
   return {
     input,
-    messages: [],
     steps: [],
   };
 }

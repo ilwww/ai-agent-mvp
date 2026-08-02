@@ -12,6 +12,8 @@
 export interface ToolAction {
   /** 动作类型，固定为 'tool' */
   type: 'tool';
+  /** 对应 OpenAI tool_call_id，用于把 tool 结果回填到消息数组 */
+  id: string;
   /** 要调用的工具名称，需在 registry 中已注册 */
   name: string;
   /** 传递给工具 run 方法的参数对象 */
@@ -70,9 +72,10 @@ export interface Tool {
   /**
    * 工具的执行函数
    * @param input 符合 schema 的参数对象
+   * @param ctx   运行时上下文；`signal` 可用于取消 fetch 等长任务
    * @returns 任意结构的执行结果，会序列化后反馈给 LLM
    */
-  run(input: Record<string, unknown>): Promise<unknown>;
+  run(input: Record<string, unknown>, ctx?: { signal?: AbortSignal }): Promise<unknown>;
 }
 
 /**
@@ -108,8 +111,6 @@ export interface AgentStep {
 export interface AgentState {
   /** 用户原始输入问题 */
   input: string;
-  /** 对话消息历史（预留字段，当前由 steps 驱动消息构建） */
-  messages: Array<{ role: string; content: string }>;
   /** 已执行的步骤列表，按时间顺序追加 */
   steps: AgentStep[];
 }
@@ -122,7 +123,7 @@ export interface AgentState {
  * - `error`：工具执行失败的错误信息
  * - `done`：任务完成，携带最终输出
  */
-export type SSEEventType = 'thought' | 'action' | 'result' | 'done' | 'error';
+export type SSEEventType = 'thought' | 'action' | 'result' | 'done' | 'error' | 'session';
 
 /**
  * Agent 运行请求体
@@ -142,4 +143,11 @@ export interface AgentRunRequest {
    * 若不传则使用所有已注册工具
    */
   tools?: string[];
+  /**
+   * 会话 ID（可选）。传入后 runtime 会：
+   * 1. 从 SessionStore 加载历史 steps 合并到当前 state
+   * 2. 本次执行结束后（正常 finish 或 MAX_STEPS）把最新 steps 写回
+   * abort / 异常场景不写回，避免半状态污染下次会话。
+   */
+  session_id?: string;
 }

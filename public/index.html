@@ -249,14 +249,26 @@
         </div>
         <div class="flex items-center gap-2">
           <span
+            id="session-id-label"
+            class="text-slate-500 text-[10px] font-mono hidden sm:inline"
+            title="当前会话 ID（跨请求记忆）"
+          ></span>
+          <span
             id="status-dot"
             class="w-2 h-2 rounded-full bg-ai-400 shadow shadow-ai-400/50"
           ></span>
           <span id="status-text" class="text-slate-400 text-xs">在线</span>
           <button
-            onclick="clearChat()"
-            title="清空对话"
+            onclick="newSession()"
+            title="新建会话（清空记忆）"
             class="ml-3 text-slate-500 hover:text-slate-300 transition-colors p-1.5 rounded-lg hover:bg-white/10"
+          >
+            <span class="material-icons-round text-lg">refresh</span>
+          </button>
+          <button
+            onclick="clearChat()"
+            title="清空当前对话（保留会话记忆）"
+            class="text-slate-500 hover:text-slate-300 transition-colors p-1.5 rounded-lg hover:bg-white/10"
           >
             <span class="material-icons-round text-lg">delete_sweep</span>
           </button>
@@ -418,6 +430,47 @@
       let selectedModel = 'qwen';
       let enableThinking = false;
       let currentAbortController = null;
+
+      // ── 会话（跨请求 Agent 记忆） ──
+      const SESSION_STORAGE_KEY = 'agent.sessionId';
+
+      function generateSessionId() {
+        if (typeof crypto?.randomUUID === 'function') return crypto.randomUUID();
+        // 老浏览器降级
+        return (
+          'sid-' +
+          Math.random().toString(36).slice(2, 10) +
+          '-' +
+          Date.now().toString(36)
+        );
+      }
+
+      function loadSessionId() {
+        let sid = localStorage.getItem(SESSION_STORAGE_KEY);
+        if (!sid) {
+          sid = generateSessionId();
+          localStorage.setItem(SESSION_STORAGE_KEY, sid);
+        }
+        return sid;
+      }
+
+      let sessionId = loadSessionId();
+
+      function renderSessionLabel() {
+        const el = $('session-id-label');
+        if (el) el.textContent = 'session · ' + sessionId.slice(0, 8);
+      }
+
+      function newSession() {
+        if (isStreaming) return;
+        sessionId = generateSessionId();
+        localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+        // 新会话默认也清屏
+        $('messages').innerHTML = '';
+        $('messages').classList.add('hidden');
+        $('welcome').classList.remove('hidden');
+        renderSessionLabel();
+      }
 
       function abortStream() {
         currentAbortController?.abort();
@@ -606,7 +659,8 @@
       function appendResultStep(container, data) {
         const el = document.createElement('div');
         el.className = 'agent-step-result';
-        const outputStr = typeof data.output === 'string' ? data.output : JSON.stringify(data.output);
+        const outputStr =
+          typeof data.output === 'string' ? data.output : JSON.stringify(data.output);
         el.innerHTML = `<div class="step-label">📋 结果: ${escapeHtml(data.tool)}</div><div class="step-detail">${escapeHtml(outputStr)}</div>`;
         container.appendChild(el);
         scrollToBottom();
@@ -615,7 +669,7 @@
       function appendDoneStep(container, data) {
         const el = document.createElement('div');
         el.className = 'agent-step-done';
-        const output = typeof data === 'string' ? data : (data.output || JSON.stringify(data));
+        const output = typeof data === 'string' ? data : data.output || JSON.stringify(data);
         el.textContent = output;
         container.appendChild(el);
         scrollToBottom();
@@ -624,7 +678,7 @@
       function appendErrorStep(container, data) {
         const el = document.createElement('div');
         el.className = 'agent-step-error';
-        const msg = typeof data === 'string' ? data : (data.error || JSON.stringify(data));
+        const msg = typeof data === 'string' ? data : data.error || JSON.stringify(data);
         el.textContent = '⚠️ ' + msg;
         container.appendChild(el);
         scrollToBottom();
@@ -690,7 +744,7 @@
           const res = await fetch('/agent/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ input: prompt }),
+            body: JSON.stringify({ input: prompt, session_id: sessionId }),
             signal: currentAbortController.signal,
           });
 
@@ -731,10 +785,26 @@
               }
 
               let data;
-              try { data = JSON.parse(dataStr); } catch { data = dataStr; }
+              try {
+                data = JSON.parse(dataStr);
+              } catch {
+                data = dataStr;
+              }
 
               if (eventType === 'thought') {
-                appendThoughtStep(stepsContainer, typeof data === 'string' ? data : JSON.stringify(data));
+                appendThoughtStep(
+                  stepsContainer,
+                  typeof data === 'string' ? data : JSON.stringify(data),
+                );
+              } else if (eventType === 'session') {
+                const restored =
+                  typeof data === 'object' && data ? data.restored_turns ?? 0 : 0;
+                if (restored > 0) {
+                  appendThoughtStep(
+                    stepsContainer,
+                    `🧠 已加载 ${restored} 轮历史会话记忆`,
+                  );
+                }
               } else if (eventType === 'action') {
                 appendActionStep(stepsContainer, data);
               } else if (eventType === 'result') {
@@ -897,7 +967,10 @@
       }
 
       // ── 自动聚焦 ──
-      window.addEventListener('load', () => $('input').focus());
+      window.addEventListener('load', () => {
+        renderSessionLabel();
+        $('input').focus();
+      });
     </script>
   </body>
 </html>

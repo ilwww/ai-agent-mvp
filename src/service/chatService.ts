@@ -1,12 +1,9 @@
 import crypto from 'node:crypto';
-import NodeCache from 'node-cache';
 import type { ChatCompletion, ChatCompletionChunk } from 'openai/resources/chat/completions.js';
 import type { Stream } from 'openai/streaming.js';
 import { getProvider } from '../model/index.js';
+import { cache } from '../store/index.js';
 import type { ChatResult } from '../types.js';
-
-/** 非流式接口的响应缓存，TTL 5 分钟 */
-const cache = new NodeCache({ stdTTL: 300 });
 
 const SYSTEM_PROMPT = '你是一个有帮助的 AI 助手。';
 
@@ -24,7 +21,7 @@ export async function runPrompt(
     .digest('hex');
 
   if (useCache) {
-    const hit = cache.get<string>(cacheKey);
+    const hit = await cache.get(cacheKey);
     if (hit !== undefined) return { data: hit, cached: true };
   }
 
@@ -37,7 +34,7 @@ export async function runPrompt(
   const resp = (await provider.chat({ messages, stream: false })) as ChatCompletion;
   const data = resp.choices[0].message.content ?? '';
 
-  if (useCache) cache.set(cacheKey, data);
+  if (useCache) await cache.set(cacheKey, data);
   return { data, cached: false };
 }
 

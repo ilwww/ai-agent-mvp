@@ -1,138 +1,163 @@
-import type { ChatCompletion } from 'openai/resources/chat/completions.js';
+import type {
+  ChatCompletion,
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+  ChatCompletionMessageToolCall,
+} from 'openai/resources/chat/completions.js';
 import { getProvider } from '../model/index.js';
-import type { Action, AgentState, Tool } from './types.js';
+import type { Action, AgentState, Tool, ToolAction } from './types.js';
+import type { SessionTurn } from '../store/types.js';
 
 /**
- * 根据可用工具列表构建 system prompt
+ * 生成简化后的 system prompt。
  *
- * 将所有工具的名称、描述和 JSON Schema 拼接成自然语言说明，
- * 注入到 system prompt 中，指导 LLM 以固定 JSON 格式输出决策。
- *
- * @param tools 当前任务可使用的工具列表
- * @returns 完整的 system prompt 字符串
- *
- * @example
- * const prompt = buildSystemPrompt([searchTool, weatherTool]);
- * // 输出包含工具描述的 system prompt，要求 LLM 以如下格式响应：
- * // {"type":"tool","name":"工具名","input":{...}} 或
- * // {"type":"finish","output":"最终回答内容"}
+ * 由于工具调用改由 OpenAI 原生 function-calling 承载（`tools` + `tool_choice`），
+ * system prompt 不再需要描述工具或约束输出 JSON 格式，只保留任务导向说明。
  */
-function buildSystemPrompt(tools: Tool[]): string {
-  const toolDescriptions = tools
-    .map((t) => `- ${t.name}: ${t.description}, 参数 schema: ${JSON.stringify(t.schema)}`)
-    .join('\n');
-
-  return `你是一个 AI Agent，你需要根据用户的任务一步步思考并选择合适的工具来完成任务。
-
-可用工具：
-${toolDescriptions}
-
-请严格按照以下 JSON 格式输出你的决策（不要输出其他内容）：
-
-如果需要调用工具：
-{"type":"tool","name":"工具名","input":{...参数}}
-
-如果任务已完成，直接输出最终回答：
-{"type":"finish","output":"最终回答内容"}`;
+function buildSystemPrompt(): string {
+  return (
+    `你是一个 AI Agent。根据用户任务与已有工具执行结果，选择合适的工具继续推进任务；` +
+    `当信息已足以回答时，直接给出最终答案，不要再调用工具。`
+  );
 }
 
 /**
- * 将当前 AgentState 转换为 LLM 可接受的对话消息数组
+ * 将 Agent 内部 Tool 定义映射为 OpenAI function-calling 规范
+ */
+function buildOpenAITools(tools: Tool[]): ChatCompletionTool[] {
+  return tools.map((t) => ({
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      parameters: t.schema as any,
+    },
+  }));
+}
+
+/**
+ * 把 AgentState.steps（当前回合）展开为 OpenAI 规范消息。
+ */
+function pushStepMessages(messages: ChatCompletionMessageParam[], steps: AgentState['steps']): void {
+  for (const step of steps) {
+    if (step.action.type !== 'tool') continue;
+    const { id, name, input } = step.action;
+    messages.push({
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id,
+          type: 'function',
+          function: { name, arguments: JSON.stringify(input) },
+        },
+      ],
+    });
+    const payload = step.error !== undefined ? { error: step.error } : (step.result ?? null);
+    messages.push({
+      role: 'tool',
+      tool_call_id: id,
+      content: JSON.stringify(payload),
+    });
+  }
+}
+
+/**
+ * 按顺序把历史 turn 展开为多轮对话消息序列。
  *
- * 构建规则：
- * 1. 首条为 system 消息（包含工具描述和输出格式约束）
- * 2. 第二条为 user 消息（用户原始输入）
- * 3. 对于 state.steps 中每个 tool 类型的步骤，追加两条消息：
- *    - assistant 消息：上一步 Planner 输出的工具调用 JSON
- *    - user 消息：工具执行的返回结果或错误信息
- *
- * @param state       当前 Agent 状态（含历史执行步骤）
- * @param systemPrompt 由 buildSystemPrompt 生成的系统提示词
- * @returns 格式化的对话消息数组，可直接传入 LLM provider
- *
- * @example
- * const messages = buildMessages(state, systemPrompt);
- * // [
- * //   { role: 'system', content: '你是一个 AI Agent...' },
- * //   { role: 'user', content: '北京今天天气？' },
- * //   { role: 'assistant', content: '{"type":"tool","name":"getWeather","input":{"city":"北京"}}' },
- * //   { role: 'user', content: '工具 getWeather 返回结果：{"city":"北京","temperature":28,...}' },
- * // ]
+ * 每个 turn 展开为：
+ *   user: turn.userInput
+ *   [assistant.tool_calls, tool] × N
+ *   assistant.content: turn.finalOutput
+ */
+function pushHistoryTurns(
+  messages: ChatCompletionMessageParam[],
+  historyTurns: SessionTurn[],
+): void {
+  for (const turn of historyTurns) {
+    messages.push({ role: 'user', content: turn.userInput });
+    pushStepMessages(messages, turn.steps);
+    messages.push({ role: 'assistant', content: turn.finalOutput });
+  }
+}
+
+/**
+ * 组装完整消息数组：system → 历史 turns → 当前 user → 当前 steps。
  */
 function buildMessages(
   state: AgentState,
   systemPrompt: string,
-): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
-  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: state.input },
-  ];
-
-  // 追加历史步骤：将每一步的工具调用与结果还原为对话上下文
-  for (const step of state.steps) {
-    if (step.action.type === 'tool') {
-      messages.push({
-        role: 'assistant',
-        content: JSON.stringify(step.action),
-      });
-      messages.push({
-        role: 'user',
-        content: `工具 ${step.action.name} 返回结果：${JSON.stringify(step.result ?? step.error)}`,
-      });
-    }
-  }
-
+  historyTurns: SessionTurn[],
+): ChatCompletionMessageParam[] {
+  const messages: ChatCompletionMessageParam[] = [{ role: 'system', content: systemPrompt }];
+  pushHistoryTurns(messages, historyTurns);
+  messages.push({ role: 'user', content: state.input });
+  pushStepMessages(messages, state.steps);
   return messages;
 }
 
 /**
- * 调用 LLM 对当前状态进行规划，返回下一步动作决策
- *
- * 流程：
- * 1. 构建包含工具描述的 system prompt
- * 2. 将状态历史转换为对话消息
- * 3. 调用 qwen provider 获取 LLM 响应
- * 4. 从响应中提取 JSON 并解析为 Action
- * 5. 若解析失败或格式不合法，降级返回 FinishAction（将原始内容作为输出）
- *
- * @param state 当前 Agent 状态（含用户输入和历史步骤）
- * @param tools 本次任务可使用的工具列表
- * @returns 解析后的 Action（ToolAction 或 FinishAction）
- *
- * @example
- * const state = createInitialState('上海明天天气如何？');
- * const tools = [getWeather];
- * const action = await plan(state, tools);
- *
- * // LLM 决定调用天气工具时：
- * // => { type: 'tool', name: 'getWeather', input: { city: '上海' } }
- *
- * // LLM 判断任务已完成时：
- * // => { type: 'finish', output: '上海明天多云，气温 22°C。' }
+ * 将 LLM 返回的 tool_calls 映射为内部 ToolAction 列表。
+ * 单条 arguments 解析失败时降级为 `input: {}` 并附带 `__argsError`，
+ * 让 executor 侧记录成 tool error step，允许 LLM 下一步纠正。
  */
-export async function plan(state: AgentState, tools: Tool[]): Promise<Action> {
-  const systemPrompt = buildSystemPrompt(tools);
-  const messages = buildMessages(state, systemPrompt);
+function mapToolCalls(toolCalls: ChatCompletionMessageToolCall[]): ToolAction[] {
+  return toolCalls.map((call) => {
+    let input: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(call.function.arguments || '{}');
+      if (parsed && typeof parsed === 'object') {
+        input = parsed as Record<string, unknown>;
+      }
+    } catch {
+      input = { __argsError: `arguments 非法 JSON: ${call.function.arguments}` };
+    }
+    return {
+      type: 'tool',
+      id: call.id,
+      name: call.function.name,
+      input,
+    };
+  });
+}
+
+/**
+ * 调用 LLM 对当前状态进行规划，返回下一步动作列表。
+ *
+ * 使用 OpenAI 原生 function-calling：
+ * - 若 LLM 返回 `tool_calls`（可能多条），映射为 ToolAction[] 供 runtime 并发执行
+ * - 若无 tool_calls，将 `content` 作为最终回答返回 FinishAction
+ *
+ * @param state        当前 Agent 状态（当前回合）
+ * @param tools        本次任务可用工具
+ * @param signal       可选 AbortSignal
+ * @param historyTurns 跨请求会话的历史 turn 列表，默认为空
+ */
+export async function plan(
+  state: AgentState,
+  tools: Tool[],
+  signal?: AbortSignal,
+  historyTurns: SessionTurn[] = [],
+): Promise<Action[]> {
+  const systemPrompt = buildSystemPrompt();
+  const messages = buildMessages(state, systemPrompt, historyTurns);
+  const oaiTools = buildOpenAITools(tools);
 
   const provider = getProvider('qwen');
-  const resp = (await provider.chat({ messages, stream: false })) as ChatCompletion;
-  const content = resp.choices[0].message.content ?? '';
+  const resp = (await provider.chat({
+    messages,
+    stream: false,
+    tools: oaiTools,
+    tool_choice: 'auto',
+    signal,
+  })) as ChatCompletion;
 
-  // 从 LLM 响应中提取 JSON 块（兼容响应中夹杂自然语言的情况）
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    // LLM 未输出任何 JSON，直接将原始内容作为最终回答
-    return { type: 'finish', output: content };
+  const msg = resp.choices[0].message;
+  const toolCalls = msg.tool_calls;
+  if (toolCalls && toolCalls.length > 0) {
+    return mapToolCalls(toolCalls);
   }
 
-  try {
-    const parsed = JSON.parse(jsonMatch[0]) as Action;
-    if (parsed.type === 'tool' && 'name' in parsed) return parsed;
-    if (parsed.type === 'finish' && 'output' in parsed) return parsed;
-    // JSON 结构不符合预期，降级处理
-    return { type: 'finish', output: content };
-  } catch {
-    // JSON.parse 失败，降级处理
-    return { type: 'finish', output: content };
-  }
+  return [{ type: 'finish', output: msg.content ?? '' }];
 }

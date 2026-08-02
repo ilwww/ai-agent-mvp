@@ -7,8 +7,11 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "dev": "tsx --watch src/index.ts",
+    "redis_dev": "SESSION_DRIVER=redis REDIS_URL=redis://localhost:6379 pnpm dev",
     "typecheck": "tsc --noEmit",
-    "test": "tsx src/index.ts & tsx test/wait-ready.ts && tsx test.ts; kill %1 2>/dev/null",
+    "test:unit": "vitest run",
+    "test:e2e": "tsx src/index.ts & tsx test/wait-ready.ts && tsx test.ts; kill %1 2>/dev/null",
+    "test": "pnpm run test:unit && pnpm run test:e2e",
     "lint": "eslint src/ test.ts",
     "lint:fix": "eslint src/ test.ts --fix",
     "format": "prettier --write src/ test.ts public/",
@@ -18,6 +21,7 @@
     "@fastify/rate-limit": "^9.0.0",
     "dotenv": "^16.0.0",
     "fastify": "^4.0.0",
+    "ioredis": "^5.11.1",
     "node-cache": "^5.1.2",
     "openai": "^4.0.0"
   },
@@ -29,6 +33,7 @@
     "prettier": "^3.8.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",
-    "typescript-eslint": "^8.58.1"
+    "typescript-eslint": "^8.58.1",
+    "vitest": "^2.1.9"
   }
 }
