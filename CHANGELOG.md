@@ -5,6 +5,7 @@
 
 ## 新功能
 
+- 添加mcp和changelog能力 — [`68ef6fc`](https://github.com/ilwww/ai-agent-mvp/commit/68ef6fc73e6b68f3447582d364bbf5fd423150cc) (2026-08-31)
 - p0优化上线 — [`d50fbbe`](https://github.com/ilwww/ai-agent-mvp/commit/d50fbbefeec56444c9417c36c210a28db1c5d9ad) (2026-08-02)
 
 ## 构建与依赖
