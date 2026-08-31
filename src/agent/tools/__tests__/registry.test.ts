@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import type { Tool } from '../../types.js';
 
 // 直接从 registry 导入，避免 tools/index.ts 副作用（会注册内置工具）
-import { registerTool, getTool, getAllTools, getToolsByNames } from '../registry.js';
+import { registerTool, getTool, getAllTools, getToolsByNames, unregisterTool } from '../registry.js';
 
 // 内部注册表是模块级 Map；测试之间需清理，用一个覆盖名 + 断言存在即可
 function makeTool(name: string): Tool {
@@ -53,5 +53,16 @@ describe('tools/registry', () => {
     registerTool(a);
     registerTool(b);
     expect(getTool('dup')).toBe(b);
+  });
+
+  it('unregisterTool 移除已注册工具，返回 true', () => {
+    registerTool(makeTool('unreg-a'));
+    expect(getTool('unreg-a')).toBeDefined();
+    expect(unregisterTool('unreg-a')).toBe(true);
+    expect(getTool('unreg-a')).toBeUndefined();
+  });
+
+  it('unregisterTool 对未注册名称返回 false', () => {
+    expect(unregisterTool('never-registered-xyz-2')).toBe(false);
   });
 });

@@ -15,10 +15,14 @@
     "lint": "eslint src/ test.ts",
     "lint:fix": "eslint src/ test.ts --fix",
     "format": "prettier --write src/ test.ts public/",
-    "format:check": "prettier --check src/ test.ts public/"
+    "format:check": "prettier --check src/ test.ts public/",
+    "prepare": "husky",
+    "commitlint": "commitlint",
+    "changelog": "node scripts/changelog.mjs"
   },
   "dependencies": {
     "@fastify/rate-limit": "^9.0.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "dotenv": "^16.0.0",
     "fastify": "^4.0.0",
     "ioredis": "^5.11.1",
@@ -26,10 +30,13 @@
     "openai": "^4.0.0"
   },
   "devDependencies": {
+    "@commitlint/cli": "21.2.2",
+    "@commitlint/config-conventional": "21.2.2",
     "@eslint/js": "^9.39.4",
     "@types/node": "^25.5.2",
     "eslint": "^9.39.4",
     "globals": "^15.15.0",
+    "husky": "9.1.7",
     "prettier": "^3.8.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",

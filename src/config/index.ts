@@ -1,5 +1,8 @@
 import 'dotenv/config';
 import type { Config } from '../types.js';
+import { parseMcpServers } from './mcpServers.js';
+
+export { parseMcpServers } from './mcpServers.js';
 
 const apiKey = process.env.DASHSCOPE_API_KEY;
 if (!apiKey) {
@@ -14,6 +17,17 @@ function parseIntEnv(name: string, fallback: number): number {
   const val = parseInt(raw, 10);
   if (Number.isNaN(val)) {
     throw new Error(`[config] ${name}="${raw}" 不是合法整数`);
+  }
+  return val;
+}
+
+/**
+ * 解析正整数环境变量，NaN / <=0 时抛出明确错误
+ */
+function parsePositiveIntEnv(name: string, fallback: number): number {
+  const val = parseIntEnv(name, fallback);
+  if (val <= 0) {
+    throw new Error(`[config] ${name}="${val}" 必须为正整数`);
   }
   return val;
 }
@@ -63,4 +77,7 @@ export const config = {
   sessionMaxTurns: parseIntEnv('SESSION_MAX_TURNS', 20),
   llmMaxRetries: parseIntEnv('LLM_MAX_RETRIES', 2),
   llmRetryBaseMs: parseIntEnv('LLM_RETRY_BASE_MS', 500),
+  mcpServers: parseMcpServers(process.env.MCP_SERVERS),
+  mcpCallTimeoutMs: parsePositiveIntEnv('MCP_CALL_TIMEOUT_MS', 30000),
+  mcpResultMaxChars: parsePositiveIntEnv('MCP_RESULT_MAX_CHARS', 8000),
 } satisfies Config;

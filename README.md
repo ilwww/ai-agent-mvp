@@ -13,7 +13,9 @@
 - `POST /chat-stream` — SSE 流式对话，实时逐字输出，支持 DeepSeek 思考模式
 - `GET /` — 内置聊天前端页面，支持 Qwen / DeepSeek / Agent 三种模式切换
 - `GET /health` — 健康检查
+- `GET /mcp/servers` — MCP 服务器连接状态与已注册工具
 - Agent 内置工具：`getWeather`（天气查询）、`search`（关键词搜索），可扩展
+- MCP 客户端：通过 `MCP_SERVERS` 挂载 stdio / streamable HTTP 服务器，自动注册其工具并支持断连重连
 - 多模型支持（`qwen` / `deepseek`，可扩展）
 - 接口限流（`@fastify/rate-limit`）
 - 请求参数 Schema 校验（Fastify + ajv）
@@ -25,6 +27,9 @@
 
 ```
 ai-agent-mvp/
+├── .husky/                     # git 钩子（commit-msg 校验、post-commit 重建 CHANGELOG）
+├── scripts/
+│   └── changelog.mjs           # 从 git 历史生成 CHANGELOG.md
 ├── public/
 │   └── index.html              # 内置聊天前端页面（支持 Agent 模式）
 ├── src/
@@ -36,6 +41,13 @@ ai-agent-mvp/
 │   │   ├── planner.ts          # Planner（LLM 决策层）
 │   │   ├── executor.ts         # Executor（工具执行器）
 │   │   ├── memory.ts           # Memory（状态管理）
+│   │   ├── mcp/                # MCP 客户端与工具桥接
+│   │   │   ├── types.ts        # MCP 配置与客户端接口类型
+│   │   │   ├── client.ts       # 客户端基类 + stdio 实现
+│   │   │   ├── httpClient.ts   # streamable HTTP 实现
+│   │   │   ├── schema.ts       # 远端 inputSchema 清洗
+│   │   │   ├── bridge.ts       # MCP tool → 本地 Tool，注册/摘除/重连
+│   │   │   └── index.ts        # 启动连接、关闭、状态查询入口
 │   │   └── tools/              # 工具系统
 │   │       ├── registry.ts     # 工具注册中心
 │   │       ├── weather.ts      # 天气查询工具
@@ -60,6 +72,8 @@ ai-agent-mvp/
 ├── tsconfig.json               # TypeScript 配置（类型检查）
 ├── tsconfig.build.json         # TypeScript 编译配置（输出 dist/）
 ├── eslint.config.js            # ESLint v9 配置
+├── commitlint.config.js        # commit message 规则
+├── CHANGELOG.md                # 变更记录（自动生成，勿手改）
 ├── .prettierrc                 # Prettier 配置
 ├── .env.example                # 环境变量模板
 └── package.json
@@ -114,6 +128,55 @@ pnpm start
 | `RATE_LIMIT_MAX` | | `60` | 每时间窗口最大请求数 |
 | `RATE_LIMIT_WINDOW` | | `1 minute` | 限流时间窗口 |
 | `REQUEST_TIMEOUT` | | `30000` | 请求超时（毫秒）|
+| `CACHE_DRIVER` | | `memory` | chat 缓存驱动，`memory` \| `redis` |
+| `SESSION_DRIVER` | | `memory` | Agent 会话驱动，`memory` \| `redis` |
+| `REDIS_URL` | | — | 任一驱动为 `redis` 时必填 |
+| `SESSION_TTL_SECONDS` | | `1800` | 会话 TTL（秒） |
+| `SESSION_MAX_TURNS` | | `20` | 会话保留的最大回合数 |
+| `LLM_MAX_RETRIES` | | `2` | LLM 可重试错误的额外重试次数 |
+| `LLM_RETRY_BASE_MS` | | `500` | LLM 重试退避基数（毫秒） |
+| `MCP_SERVERS` | | `[]` | MCP 服务器配置（JSON 数组），见下方 MCP 章节 |
+| `MCP_CALL_TIMEOUT_MS` | | `30000` | 单次 MCP 工具调用超时（毫秒） |
+| `MCP_RESULT_MAX_CHARS` | | `8000` | 单次 MCP 工具结果最大字符数，超出截断 |
+
+---
+
+## MCP（Model Context Protocol）
+
+配置 `MCP_SERVERS` 后，服务启动时会并发连接各 MCP 服务器，把它们的 `tools/list` 注册进本地工具注册表，
+Agent 即可直接调用。单台连接失败不阻塞启动，失败与断连都会按指数退避（1s → 30s 上限）自动重连。
+
+### stdio（本地子进程）
+
+```env
+MCP_SERVERS=[{"name":"fs","transport":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/tmp"]}]
+```
+
+### http（streamable HTTP，远程）
+
+```env
+MCP_SERVERS=[{"name":"remote","transport":"http","url":"https://mcp.example.com/mcp","headers":{"Authorization":"Bearer xxx"}}]
+```
+
+### 配置字段
+
+| 字段 | 适用 | 必填 | 说明 |
+|------|------|:----:|------|
+| `name` | 全部 | ✅ | 唯一名称，仅允许 `[a-zA-Z0-9_-]`，不得与内置工具同名 |
+| `transport` | 全部 | ✅ | `stdio` \| `http` |
+| `command` / `args` / `env` | stdio | `command` 必填 | 子进程启动命令与环境变量 |
+| `url` / `headers` | http | `url` 必填 | MCP endpoint 与鉴权请求头 |
+| `allowTools` | 全部 | | 白名单，仅注册命中的远端工具 |
+| `denyTools` | 全部 | | 黑名单，优先于 `allowTools` |
+
+### 工具命名与安全约束
+
+- 本地工具名为 `${server}__${remoteTool}`；非法字符替换为 `_`，超过 64 字符时截断并追加短 hash。
+- 远端 `inputSchema` 会被清洗（剥离 `$ref` / `$schema` 等），保证顶层为 `type: object`。
+- 单次调用超时受 `MCP_CALL_TIMEOUT_MS` 约束；结果文本按 `MCP_RESULT_MAX_CHARS` 截断，
+  image / audio / resource 等非文本内容降级为占位描述，避免打爆上下文。
+- MCP 工具对所有请求可见，且 `GET /mcp/servers` 未做鉴权。挂载具备写入或命令执行能力的
+  server（如 filesystem、shell）时，务必用 `denyTools` / `allowTools` 收紧，并自行在网关层限制访问。
 
 ---
 
@@ -262,6 +325,26 @@ data: {"output":"北京今天天气晴，气温25度。"}
 
 ---
 
+### `GET /mcp/servers`
+
+MCP 连接状态与已注册工具，便于排障。未配置 `MCP_SERVERS` 时返回空数组。
+
+```json
+{
+  "servers": [
+    {
+      "name": "fs",
+      "transport": "stdio",
+      "connected": true,
+      "tools": ["fs__read_text_file", "fs__list_directory"],
+      "reconnectAttempts": 0
+    }
+  ]
+}
+```
+
+---
+
 ## 开发命令
 
 ```bash
@@ -274,7 +357,54 @@ pnpm lint          # ESLint 检查
 pnpm lint:fix      # ESLint 自动修复
 pnpm format        # Prettier 格式化
 pnpm format:check  # Prettier 格式检查（CI 使用）
+pnpm changelog     # 从 git 历史重建 CHANGELOG.md
 ```
+
+---
+
+## 提交规范
+
+提交信息遵循 [Conventional Commits](https://www.conventionalcommits.org/zh-hans/)，
+由 husky + commitlint 在 `commit-msg` 阶段强制校验，不合规直接拒绝提交。
+
+```
+<type>(<scope>): <描述>
+
+例：feat(mcp): 支持 streamable HTTP transport
+    fix: 修复工具调用超时未释放子进程
+```
+
+| type | 含义 |
+|------|------|
+| `feat` | 新功能 |
+| `fix` | 缺陷修复 |
+| `perf` | 性能优化 |
+| `refactor` | 重构（不改变外部行为） |
+| `docs` | 文档 |
+| `test` | 测试 |
+| `build` | 构建、依赖变更 |
+| `ci` | CI 配置 |
+| `style` | 代码格式（不影响逻辑） |
+| `chore` | 杂项 |
+| `revert` | 回滚 |
+
+约束说明：
+
+- 冒号必须是**半角** `:`，全角 `：` 会被判为缺少 type 而拒绝。
+- 描述可用中文，不校验大小写与结尾句号；`scope` 可用中文。
+- 标题总长不超过 100 字符。
+
+### CHANGELOG
+
+`CHANGELOG.md` 由 `pnpm changelog` 从 git 历史完整重建（`scripts/changelog.mjs`），
+每条记录带短 hash、日期与 commit 链接，**所有** type 都会收录，不隐藏 chore / docs 等。
+
+`post-commit` 钩子会在每次提交后自动重建该文件。注意：钩子在 commit 生成之后运行，
+因此 `CHANGELOG.md` 的更新会留在工作区，随**下一次**提交进入历史。
+这是刻意选择——不在钩子里 `--amend`，避免改写已生成的 commit 与钩子递归。
+任何时刻执行 `pnpm changelog` 都能从全量历史无损重建，记录不会丢。
+
+不要手工编辑 `CHANGELOG.md`，改动会在下次生成时被覆盖。
 
 ---
 

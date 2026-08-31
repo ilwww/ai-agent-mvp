@@ -9,6 +9,7 @@ import { chatHandler } from './controller/chatController.js';
 import { chatStreamHandler } from './controller/chatStream.js';
 import { agentRoutes } from './routes/agent.js';
 import type { ChatRequestBody } from './types.js';
+import { connectAllMcpServers, closeAllMcpServers, getMcpStatus } from './agent/mcp/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -54,6 +55,21 @@ app.post<{ Body: ChatRequestBody }>('/chat', { schema: chatBodySchema }, chatHan
 app.post<{ Body: ChatRequestBody }>('/chat-stream', { schema: chatBodySchema }, chatStreamHandler);
 await app.register(agentRoutes);
 app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+// MCP 连接态与已注册工具，便于排障
+app.get('/mcp/servers', async () => ({ servers: getMcpStatus() }));
+
+// 启动阶段并发连接 MCP 服务器；单台失败不阻塞主服务
+await connectAllMcpServers(config.mcpServers, app.log, {
+  limits: {
+    callTimeoutMs: config.mcpCallTimeoutMs,
+    resultMaxChars: config.mcpResultMaxChars,
+  },
+});
+
+// 退出时统一关闭 MCP 连接
+app.addHook('onClose', async () => {
+  await closeAllMcpServers();
+});
 
 // 启动服务
 try {

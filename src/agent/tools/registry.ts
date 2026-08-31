@@ -80,3 +80,16 @@ export function getAllTools(): Tool[] {
 export function getToolsByNames(names: string[]): Tool[] {
   return names.map((n) => toolRegistry.get(n)).filter((t): t is Tool => t !== undefined);
 }
+
+/**
+ * 从注册表中移除指定名称的工具。
+ *
+ * 主要用于 MCP 服务器断连时清理该 server 已注册的工具，
+ * 使后续的 planner 只看到当前仍可用的工具集合。
+ *
+ * @param name 工具名称
+ * @returns 该名称此前是否存在（true 表示实际被删除，false 表示未注册）
+ */
+export function unregisterTool(name: string): boolean {
+  return toolRegistry.delete(name);
+}

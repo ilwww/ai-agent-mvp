@@ -1,0 +1,2 @@
+pnpm changelog || true
+echo "husky - CHANGELOG.md 已按最新历史重建，请随下次提交一并带上"

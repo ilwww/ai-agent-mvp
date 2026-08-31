@@ -6,6 +6,7 @@ import type {
   ChatCompletionToolChoiceOption,
 } from 'openai/resources/chat/completions.js';
 import type { Stream } from 'openai/streaming.js';
+import type { MCPServerConfig } from './agent/mcp/types.js';
 
 /** 全局配置对象类型 */
 export interface Config {
@@ -33,6 +34,12 @@ export interface Config {
   llmMaxRetries: number;
   /** LLM 调用指数退避的基础延迟（毫秒） */
   llmRetryBaseMs: number;
+  /** MCP 服务器配置列表；未配置时为空数组 */
+  mcpServers: MCPServerConfig[];
+  /** 单次 MCP 工具调用超时（毫秒） */
+  mcpCallTimeoutMs: number;
+  /** 单次 MCP 工具结果的最大字符数，超出截断 */
+  mcpResultMaxChars: number;
 }
 
 /** 请求体结构（对应 Fastify AJV Schema） */

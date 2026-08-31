@@ -28,4 +28,4 @@ registerTool(getWeather);
 registerTool(search);
 
 // 重新导出 registry API
-export { getTool, getAllTools, getToolsByNames, registerTool } from './registry.js';
+export { getTool, getAllTools, getToolsByNames, registerTool, unregisterTool } from './registry.js';

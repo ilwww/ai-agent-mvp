@@ -2,7 +2,13 @@
 
 **目标**：让 Agent 能上生产——接生态、能运维、可持久、有身份。
 
-## P1-1 接入 MCP（Model Context Protocol）
+## P1-1 接入 MCP（Model Context Protocol）✅ 已完成
+
+> 状态：已完成（详见 `.comate/specs/mcp-integration/summary.md`）。
+> 实际实现：stdio transport、tools 桥接与注册、断连摘除 + 指数退避重连、`MCP_SERVERS` 配置校验、单测。
+> 命名前缀最终采用 `${server}__${tool}`（双下划线，兼容 OpenAI function 名规则），非原计划的 `.`。
+> 剩余缺口（超时、结果截断、schema 清洗、HTTP transport、准入控制、观测性等）见
+> `.comate/specs/mcp-hardening/doc.md`。
 
 - **目的**：让 Agent 能直接消费 MCP 生态的工具服务器（filesystem、git、db、浏览器等），避免每个工具重复造轮子。
 - **影响文件**：
